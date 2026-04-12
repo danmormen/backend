@@ -2,10 +2,14 @@ const db = require('../config/DBconfig');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
-const { JWT_SECRET } = require('../middleware/authMiddleware');
+
+// Ya no importamos JWT_SECRET del middleware.
+// Leemos directamente de las variables de entorno.
+const secretKey = process.env.JWT_SECRET || 'fallback_secreto_por_si_acaso_123';
 
 const generarToken = (id, rol) => {
-    return jwt.sign({ id, rol }, JWT_SECRET, { expiresIn: '7d' });
+    // Usamos secretKey para firmar el token
+    return jwt.sign({ id, rol }, secretKey, { expiresIn: '7d' });
 };
 
 const registrar = async (req, res) => {
@@ -25,6 +29,7 @@ const registrar = async (req, res) => {
             return res.status(400).json({ message: 'El email ya está registrado' });
         }
         
+        // Hasheamos la contraseña antes de guardarla (¡Excelente práctica!)
         const hashedPassword = await bcrypt.hash(password, 10);
         const sql = 'INSERT INTO usuarios (nombre, email, password, telefono, rol, activo) VALUES (?, ?, ?, ?, ?, ?)';
         db.query(sql, [nombre, email, hashedPassword, telefono, 'cliente', 1], (err, result) => {
@@ -64,6 +69,7 @@ const login = (req, res) => {
             return res.status(401).json({ message: 'Cuenta desactivada, contacte al administrador' });
         }
         
+        // Comparamos el password plano con el hash de la base de datos
         const passwordValido = await bcrypt.compare(password, usuario.password);
         if (!passwordValido) {
             return res.status(401).json({ message: 'Credenciales inválidas' });
