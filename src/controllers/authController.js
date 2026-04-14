@@ -3,12 +3,9 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 
-// Ya no importamos JWT_SECRET del middleware.
-// Leemos directamente de las variables de entorno.
 const secretKey = process.env.JWT_SECRET || 'fallback_secreto_por_si_acaso_123';
 
 const generarToken = (id, rol) => {
-    // Usamos secretKey para firmar el token
     return jwt.sign({ id, rol }, secretKey, { expiresIn: '7d' });
 };
 
@@ -18,7 +15,12 @@ const registrar = async (req, res) => {
     if (!errors.isEmpty()) {
         return res.status(400).json({ errores: errors.array() });
     }
-    const { nombre, email, password, telefono } = req.body;
+    
+    const { nombre, apellido, email, password, fechaNacimiento } = req.body;
+    const nombreCompleto = `${nombre} ${apellido}`;
+
+    const [dia, mes, anio] = fechaNacimiento.split('/');
+    const fechaSQL = `${anio}-${mes}-${dia}`;
     
     db.query('SELECT id FROM usuarios WHERE email = ?', [email], async (err, results) => {
         if (err) {
@@ -29,23 +31,31 @@ const registrar = async (req, res) => {
             return res.status(400).json({ message: 'El email ya está registrado' });
         }
         
-        // Hasheamos la contraseña antes de guardarla (¡Excelente práctica!)
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const sql = 'INSERT INTO usuarios (nombre, email, password, telefono, rol, activo) VALUES (?, ?, ?, ?, ?, ?)';
-        db.query(sql, [nombre, email, hashedPassword, telefono, 'cliente', 1], (err, result) => {
-            if (err) {
-                console.error(err);
-                return res.status(500).json({ message: 'Error al crear usuario' });
-            }
-            const token = generarToken(result.insertId, 'cliente');
-            res.status(201).json({
-                id: result.insertId,
-                nombre,
-                email,
-                rol: 'cliente',
-                token
+        try {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            
+            // Los clientes nuevos no suelen requerir cambio de contraseña forzoso (requiere_cambio = 0)
+            const sql = 'INSERT INTO usuarios (nombre, email, password, fecha_nacimiento, rol, activo, requiere_cambio) VALUES (?, ?, ?, ?, ?, ?, 0)';
+            
+            db.query(sql, [nombreCompleto, email, hashedPassword, fechaSQL, 'cliente', 1], (err, result) => {
+                if (err) {
+                    console.error(err);
+                    return res.status(500).json({ message: 'Error al crear usuario' });
+                }
+                const token = generarToken(result.insertId, 'cliente');
+                res.status(201).json({
+                    id: result.insertId,
+                    nombre: nombreCompleto,
+                    email,
+                    rol: 'cliente',
+                    token,
+                    requiere_cambio: 0
+                });
             });
-        });
+        } catch (error) {
+            console.error('Error al hashear la contraseña:', error);
+            res.status(500).json({ message: 'Error interno al procesar el registro' });
+        }
     });
 };
 
@@ -55,6 +65,7 @@ const login = (req, res) => {
         return res.status(400).json({ message: 'Email y contraseña son requeridos' });
     }
     
+    // IMPORTANTE: Seleccionamos todo (*) para traer la columna requiere_cambio
     db.query('SELECT * FROM usuarios WHERE email = ?', [email], async (err, results) => {
         if (err) {
             console.error(err);
@@ -69,19 +80,21 @@ const login = (req, res) => {
             return res.status(401).json({ message: 'Cuenta desactivada, contacte al administrador' });
         }
         
-        // Comparamos el password plano con el hash de la base de datos
         const passwordValido = await bcrypt.compare(password, usuario.password);
         if (!passwordValido) {
             return res.status(401).json({ message: 'Credenciales inválidas' });
         }
         
         const token = generarToken(usuario.id, usuario.rol);
+
+      
         res.json({
             id: usuario.id,
             nombre: usuario.nombre,
             email: usuario.email,
             rol: usuario.rol,
-            token
+            token: token,
+            requiere_cambio: usuario.requiere_cambio 
         });
     });
 };

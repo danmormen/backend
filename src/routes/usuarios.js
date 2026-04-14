@@ -32,146 +32,202 @@ module.exports = (app) => {
 
 const express = require('express');
 const router = express.Router();
-const db = require('../config/DBconfig');   // ← ruta correcta
+const db = require('../config/DBconfig');
 const bcrypt = require('bcryptjs');
 const { protect, adminOnly } = require('../middleware/authMiddleware');
 
-// Todas las rutas requieren autenticación y rol admin
+
+// Formato de fecha AAAA-MM-DD 
+const formatearFecha = (fecha) => {
+    if (!fecha) return null;
+    // Si viene de Angular como "YYYY-MM-DDT00:00:00", extraemos solo la parte de la fecha
+    if (typeof fecha === 'string' && fecha.includes('T')) {
+        return fecha.split('T')[0];
+    }
+    return fecha; 
+};
+
+
+// rutas usuario
+
+// token válido
 router.use(protect);
+
+/**
+ * PATCH /api/usuarios/:id/cambiar-password
+ * Esta ruta está antes de adminOnly para que Estilistas y Admins puedan usarla.
+ */
+router.patch('/:id/cambiar-password', async (req, res) => {
+    const { id } = req.params;
+    const { password } = req.body;
+    
+    // Seguridad: Un estilista solo puede cambiarse su propia clave. El admin puede cambiar cualquiera.
+    if (req.user.rol !== 'admin' && req.user.id !== parseInt(id)) {
+        return res.status(403).json({ error: 'No tienes permiso para actualizar esta contraseña.' });
+    }
+
+    if (!password || password.length < 6) {
+        return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres.' });
+    }
+    
+    try {
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        // Actualizamos la clave y reseteamos el flag de cambio obligatorio
+        const sql = 'UPDATE usuarios SET password = ?, requiere_cambio = 0 WHERE id = ?';
+        
+        db.query(sql, [hashedPassword, id], (err, result) => {
+            if (err) {
+                console.error("Error SQL en cambio-password:", err);
+                return res.status(500).json({ error: 'Error al actualizar la contraseña en la base de datos.' });
+            }
+            res.json({ message: 'Contraseña actualizada correctamente.' });
+        });
+    } catch (e) {
+        console.error("Error en servidor:", e);
+        res.status(500).json({ error: 'Error interno del servidor.' });
+    }
+});
+
+// -------------------------------------------
+// RUTAS EXCLUSIVAS PARA ADMINISTRADORES
+
 router.use(adminOnly);
 
-// GET /api/usuarios - Obtener todos los usuarios
+
+ // GET /api/usuarios - Obtener lista de personal (Admins y Estilistas)
+ 
 router.get('/', (req, res) => {
-    db.query('SELECT id, nombre, email, telefono, rol, activo, created_at FROM usuarios', (err, results) => {
+    const sql = `
+        SELECT id, nombre, email, telefono, rol, especialidad, direccion, fecha_nacimiento, avatar, activo, requiere_cambio, created_at 
+        FROM usuarios 
+        WHERE LOWER(rol) IN ('admin', 'estilista')
+        ORDER BY nombre ASC
+    `;
+    
+    db.query(sql, (err, results) => {
         if (err) {
-            console.error(err);
-            return res.status(500).json({ error: 'Error al obtener usuarios' });
+            console.error("Error SQL al obtener usuarios:", err);
+            return res.status(500).json({ error: 'Error al obtener la lista de personal.' });
         }
         res.json(results);
     });
 });
 
-// GET /api/usuarios/:id - Obtener un usuario por ID
+/**
+ * GET /api/usuarios/:id - Obtener un usuario específico
+ */
 router.get('/:id', (req, res) => {
     const { id } = req.params;
-    db.query('SELECT id, nombre, email, telefono, rol, activo, created_at FROM usuarios WHERE id = ?', [id], (err, results) => {
-        if (err) {
-            console.error(err);
-            return res.status(500).json({ error: 'Error al obtener usuario' });
-        }
-        if (results.length === 0) {
-            return res.status(404).json({ message: 'Usuario no encontrado' });
-        }
+    const sql = 'SELECT id, nombre, email, telefono, rol, especialidad, direccion, fecha_nacimiento, avatar, activo, requiere_cambio FROM usuarios WHERE id = ?';
+    db.query(sql, [id], (err, results) => {
+        if (err) return res.status(500).json({ error: 'Error al obtener usuario.' });
+        if (results.length === 0) return res.status(404).json({ message: 'Usuario no encontrado.' });
         res.json(results[0]);
     });
 });
 
-// POST /api/usuarios - Crear un nuevo usuario (admin puede asignar rol)
+/**
+ * POST /api/usuarios - Crear nuevo usuario (Admin/Estilista)
+ */
 router.post('/', async (req, res) => {
-    let { nombre, email, password, telefono, rol = 'cliente', activo = 1 } = req.body;
+    let { 
+        nombre, email, password, telefono, 
+        rol = 'estilista', especialidad, direccion, 
+        fecha_nacimiento, avatar, activo = 1 
+    } = req.body;
     
     if (!nombre || !email || !password) {
-        return res.status(400).json({ error: 'Faltan campos obligatorios: nombre, email, password' });
+        return res.status(400).json({ error: 'Nombre, email y contraseña son obligatorios.' });
     }
     
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        const sql = 'INSERT INTO usuarios (nombre, email, password, telefono, rol, activo) VALUES (?, ?, ?, ?, ?, ?)';
-        db.query(sql, [nombre, email, hashedPassword, telefono, rol, activo], (err, result) => {
+        const fechaSQL = formatearFecha(fecha_nacimiento);
+        
+        // Insertamos con requiere_cambio = 1 para que al primer login deban cambiarla
+        const sql = `
+            INSERT INTO usuarios 
+            (nombre, email, password, telefono, rol, especialidad, direccion, fecha_nacimiento, avatar, activo, requiere_cambio) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        `;
+        
+        const values = [
+            nombre.trim(), 
+            email.trim(), 
+            hashedPassword, 
+            telefono || null, 
+            rol, 
+            especialidad || null, 
+            direccion || null, 
+            fechaSQL, 
+            avatar || null, 
+            activo
+        ];
+
+        db.query(sql, values, (err, result) => {
             if (err) {
-                console.error(err);
+                console.error("Error SQL al crear usuario:", err);
                 if (err.code === 'ER_DUP_ENTRY') {
-                    return res.status(409).json({ error: 'El email ya está registrado' });
+                    return res.status(409).json({ error: 'El correo electrónico ya está registrado.' });
                 }
-                return res.status(500).json({ error: 'Error al crear usuario' });
+                return res.status(500).json({ error: 'Error al guardar el usuario.' });
             }
-            res.status(201).json({ message: 'Usuario creado correctamente', id: result.insertId });
+            res.status(201).json({ message: 'Usuario creado con éxito.', id: result.insertId });
         });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'Error interno del servidor' });
+        res.status(500).json({ error: 'Error interno del servidor.' });
     }
 });
 
-// PUT /api/usuarios/:id - Actualizar usuario completo
+/**
+ * PUT /api/usuarios/:id - Actualizar usuario completo
+ */
 router.put('/:id', (req, res) => {
     const { id } = req.params;
-    const { nombre, email, telefono, rol, activo } = req.body;
-    const sql = 'UPDATE usuarios SET nombre = ?, email = ?, telefono = ?, rol = ?, activo = ? WHERE id = ?';
-    db.query(sql, [nombre, email, telefono, rol, activo, id], (err, result) => {
-        if (err) {
-            console.error(err);
-            return res.status(500).json({ error: 'Error al actualizar' });
-        }
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ message: 'Usuario no encontrado' });
-        }
-        res.json({ message: 'Usuario actualizado' });
-    });
-});
+    const { nombre, email, telefono, rol, especialidad, direccion, fecha_nacimiento, avatar, activo } = req.body;
+    
+    const fechaSQL = formatearFecha(fecha_nacimiento);
+    
+    const sql = `
+        UPDATE usuarios 
+        SET nombre = ?, email = ?, telefono = ?, rol = ?, especialidad = ?, direccion = ?, fecha_nacimiento = ?, avatar = ?, activo = ? 
+        WHERE id = ?
+    `;
+    
+    const values = [
+        nombre.trim(), 
+        email.trim(), 
+        telefono || null, 
+        rol, 
+        especialidad || null, 
+        direccion || null, 
+        fechaSQL, 
+        avatar || null, 
+        activo, 
+        id
+    ];
 
-// PATCH /api/usuarios/:id - Actualizar parcialmente
-router.patch('/:id', (req, res) => {
-    const { id } = req.params;
-    const updates = req.body;
-    const allowed = ['nombre', 'email', 'telefono', 'rol', 'activo'];
-    const fields = [];
-    const values = [];
-    for (const key of allowed) {
-        if (updates[key] !== undefined) {
-            fields.push(`${key} = ?`);
-            values.push(updates[key]);
-        }
-    }
-    if (fields.length === 0) {
-        return res.status(400).json({ error: 'No hay campos para actualizar' });
-    }
-    values.push(id);
-    const sql = `UPDATE usuarios SET ${fields.join(', ')} WHERE id = ?`;
     db.query(sql, values, (err, result) => {
         if (err) {
-            console.error(err);
-            return res.status(500).json({ error: 'Error al actualizar' });
+            console.error("Error SQL al actualizar:", err);
+            return res.status(500).json({ error: 'No se pudo actualizar el usuario.' });
         }
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ message: 'Usuario no encontrado' });
-        }
-        res.json({ message: 'Usuario actualizado parcialmente' });
+        res.json({ message: 'Usuario actualizado correctamente.' });
     });
 });
 
-// PATCH /api/usuarios/:id/cambiar-password - Cambiar contraseña
-router.patch('/:id/cambiar-password', async (req, res) => {
-    const { id } = req.params;
-    const { password } = req.body;
-    if (!password || password.length < 6) {
-        return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
-    }
-    const hashedPassword = await bcrypt.hash(password, 10);
-    db.query('UPDATE usuarios SET password = ? WHERE id = ?', [hashedPassword, id], (err, result) => {
-        if (err) {
-            console.error(err);
-            return res.status(500).json({ error: 'Error al cambiar contraseña' });
-        }
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ message: 'Usuario no encontrado' });
-        }
-        res.json({ message: 'Contraseña actualizada' });
-    });
-});
-
-// DELETE /api/usuarios/:id - Eliminar usuario
+/**
+ * DELETE /api/usuarios/:id - Eliminar usuario
+ */
 router.delete('/:id', (req, res) => {
     const { id } = req.params;
     db.query('DELETE FROM usuarios WHERE id = ?', [id], (err, result) => {
         if (err) {
-            console.error(err);
-            return res.status(500).json({ error: 'Error al eliminar' });
+            console.error("Error SQL al eliminar:", err);
+            return res.status(500).json({ error: 'No se pudo eliminar el usuario.' });
         }
-        if (result.affectedRows === 0) {
-            return res.status(404).json({ message: 'Usuario no encontrado' });
-        }
-        res.json({ message: 'Usuario eliminado' });
+        res.json({ message: 'Usuario eliminado correctamente.' });
     });
 });
 

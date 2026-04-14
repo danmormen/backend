@@ -25,15 +25,13 @@ app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
 });
 */
-
-// 1. Cargar variables de entorno lo antes posible
+// 1. Cargar variables de entorno
 require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
 
 const app = express();
-// Usar el puerto del entorno o el 3000 por defecto
 const port = process.env.PORT || 3000;
 
 // ==========================================
@@ -41,7 +39,13 @@ const port = process.env.PORT || 3000;
 // ==========================================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors()); // Permite peticiones de tu frontend en Angular
+
+// Configuración de CORS mejorada para permitir el Token (Authorization)
+app.use(cors({
+    origin: '*', // En producción, cambia '*' por la URL de tu frontend
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // ==========================================
 // IMPORTACIÓN DE RUTAS
@@ -55,20 +59,34 @@ const authRouter = require('./src/routes/authRoutes');
 app.use('/api/usuarios', usuariosRouter);
 app.use('/api/auth', authRouter);
 
-// Ruta base para comprobar que el backend vive
+// Ruta base
 app.get('/', (req, res) => {
-  res.send('Backend de PonteGuapa funcionando correctamente 💅');
+  res.send('Backend de PonteGuapa funcionando correctamente');
 });
 
-// Ruta de prueba que tenías al final (movida antes del listen)
+// Ruta de prueba
 app.post('/test', (req, res) => {
     console.log('Body recibido en test:', req.body);
     res.json(req.body);
 });
 
 // ==========================================
+// MANEJO DE ERRORES (IMPORTANTE)
+// ==========================================
+// Si una ruta no existe
+app.use((req, res, next) => {
+    res.status(404).json({ message: "La ruta solicitada no existe" });
+});
+
+// Error general del servidor
+app.use((err, req, res, next) => {
+    console.error('Error no controlado:', err.stack);
+    res.status(500).json({ error: 'Algo salió mal en el servidor' });
+});
+
+// ==========================================
 // INICIO DEL SERVIDOR
 // ==========================================
 app.listen(port, () => {
-  console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
+  console.log(`Servidor corriendo en http://localhost:${port}`);
 });

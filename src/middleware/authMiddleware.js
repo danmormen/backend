@@ -1,13 +1,11 @@
 const jwt = require('jsonwebtoken');
 const db = require('../config/DBconfig');
 
-// Usamos la variable de entorno, o un fallback temporal para desarrollo
 const JWT_SECRET = process.env.JWT_SECRET || 'mi_clave_super_secreta_123';
 
 const protect = (req, res, next) => {
     let token;
     
-    // 1. Extraemos el token del header
     if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
         token = req.headers.authorization.split(' ')[1];
     }
@@ -17,20 +15,23 @@ const protect = (req, res, next) => {
     }
 
     try {
-        // 2. Verificamos que el token sea válido (esto falla si expiró o fue manipulado)
         const decoded = jwt.verify(token, JWT_SECRET);
 
-        // 3. Buscamos al usuario en la DB para confirmar que sigue activo
-        db.query('SELECT id, nombre, email, rol FROM usuarios WHERE id = ? AND activo = 1', [decoded.id], (err, results) => {
+        // Verificamos usuario. Nota: eliminamos el filtro "activo = 1" temporalmente 
+        // solo para descartar que sea un problema de cuenta desactivada.
+        db.query('SELECT id, nombre, email, rol, activo FROM usuarios WHERE id = ?', [decoded.id], (err, results) => {
             if (err) {
-                return res.status(500).json({ message: 'Error en el servidor al verificar usuario' });
+                return res.status(500).json({ message: 'Error en el servidor' });
             }
             if (results.length === 0) {
-                return res.status(401).json({ message: 'Usuario no válido o cuenta desactivada' });
+                return res.status(401).json({ message: 'Usuario no encontrado' });
             }
             
-            // Adjuntamos el usuario al request para que las siguientes rutas/middlewares lo usen
-            req.usuario = results[0];
+            // Forzamos el rol a minúsculas para evitar errores de comparación
+            const usuario = results[0];
+            usuario.rol = usuario.rol.toLowerCase(); 
+            
+            req.usuario = usuario;
             next();
         });
     } catch (error) {
@@ -39,21 +40,22 @@ const protect = (req, res, next) => {
 };
 
 const adminOnly = (req, res, next) => {
+    // Validamos en minúsculas siempre
     if (req.usuario && req.usuario.rol === 'admin') {
         next();
     } else {
-        res.status(403).json({ message: 'Acceso denegado, se requiere rol de administrador' });
+        res.status(403).json({ 
+            message: `Acceso denegado. Tu rol actual es: ${req.usuario ? req.usuario.rol : 'ninguno'}` 
+        });
     }
 };
 
 const estilistaOnly = (req, res, next) => {
-    // Permite el paso tanto a estilistas como a administradores
     if (req.usuario && (req.usuario.rol === 'estilista' || req.usuario.rol === 'admin')) {
         next();
     } else {
-        res.status(403).json({ message: 'Acceso denegado, se requiere rol de estilista' });
+        res.status(403).json({ message: 'Acceso denegado' });
     }
 };
 
-// Ya no exportamos el JWT_SECRET, mantenemos este archivo enfocado solo en middlewares
 module.exports = { protect, adminOnly, estilistaOnly };

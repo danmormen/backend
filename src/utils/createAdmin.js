@@ -12,7 +12,7 @@ async function createAdmin() {
             return;
         }
         if (results.length > 0) {
-            console.log('✅ El administrador ya existe.');
+            console.log(' El administrador ya existe.');
             process.exit(0);
         }
         const hashedPassword = await bcrypt.hash(adminPassword, 10);
@@ -21,7 +21,7 @@ async function createAdmin() {
             if (err) {
                 console.error('Error al crear admin:', err);
             } else {
-                console.log(`✅ Administrador creado:
+                console.log(` Administrador creado:
     Email: ${adminEmail}
     Contraseña: ${adminPassword}
     Rol: admin`);
