@@ -17,44 +17,49 @@ const protect = (req, res, next) => {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
 
-        // Verificamos usuario. Nota: eliminamos el filtro "activo = 1" temporalmente 
-        // solo para descartar que sea un problema de cuenta desactivada.
         db.query('SELECT id, nombre, email, rol, activo FROM usuarios WHERE id = ?', [decoded.id], (err, results) => {
             if (err) {
+                console.error("Error en DB durante validación de token:", err);
                 return res.status(500).json({ message: 'Error en el servidor' });
             }
+            
             if (results.length === 0) {
-                return res.status(401).json({ message: 'Usuario no encontrado' });
+                return res.status(401).json({ message: 'Usuario no encontrado o sesión expirada' });
             }
             
-            // Forzamos el rol a minúsculas para evitar errores de comparación
             const usuario = results[0];
-            usuario.rol = usuario.rol.toLowerCase(); 
             
-            req.usuario = usuario;
+            // Normalización segura
+            usuario.rol = usuario.rol ? usuario.rol.toLowerCase() : ''; 
+            
+            // Asignamos a req.user
+            req.user = usuario; 
             next();
         });
     } catch (error) {
+        console.error("Error al verificar token JWT:", error.message);
         return res.status(401).json({ message: 'Token inválido o expirado' });
     }
 };
 
 const adminOnly = (req, res, next) => {
-    // Validamos en minúsculas siempre
-    if (req.usuario && req.usuario.rol === 'admin') {
+    // CAMBIO DE SEGURIDAD: Verificamos primero si req.user existe antes de leer .rol
+    if (req.user && req.user.rol === 'admin') {
         next();
     } else {
-        res.status(403).json({ 
-            message: `Acceso denegado. Tu rol actual es: ${req.usuario ? req.usuario.rol : 'ninguno'}` 
+        // Evitamos que el servidor se caiga si req.user es undefined
+        const userRol = req.user ? req.user.rol : 'desconocido';
+        return res.status(403).json({ 
+            message: `Acceso denegado. Se requiere rol de administrador. Tu rol actual: ${userRol}` 
         });
     }
 };
 
 const estilistaOnly = (req, res, next) => {
-    if (req.usuario && (req.usuario.rol === 'estilista' || req.usuario.rol === 'admin')) {
+    if (req.user && (req.user.rol === 'estilista' || req.user.rol === 'admin')) {
         next();
     } else {
-        res.status(403).json({ message: 'Acceso denegado' });
+        return res.status(403).json({ message: 'Acceso denegado. Debes ser estilista o administrador.' });
     }
 };
 

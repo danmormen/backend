@@ -1,31 +1,6 @@
-/* const express = require('express');
-const app = express();
-const port = 3000;
-
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(require('cors')()); 
-
-require('./src/routes/Usuarios')(app);
-
-//rutas jwt
-const authRoutes = require('./src/routes/authRoutes');
-const usuariosRoutes = require('./src/routes/usuariosRoutes');
-
-app.use('/api/auth', authRoutes);
-app.use('/api/usuarios', usuariosRoutes);
-
-
-app.get('/', (req, res) => {
-  res.send('¡Backend funcionando perfectamente en mi mini Mac!');
-});
-
-app.listen(port, () => {
-  console.log(`Servidor escuchando en http://localhost:${port}`);
-});
-*/
+// ==========================================
 // 1. Cargar variables de entorno
+// ==========================================
 require('dotenv').config();
 
 const express = require('express');
@@ -35,58 +10,63 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // ==========================================
-// MIDDLEWARES GLOBALES
+// 2. MIDDLEWARES GLOBALES
 // ==========================================
+// Permite que el servidor entienda JSON y formularios
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Configuración de CORS mejorada para permitir el Token (Authorization)
+// Configuración de CORS para permitir peticiones desde el Frontend
 app.use(cors({
-    origin: '*', // En producción, cambia '*' por la URL de tu frontend
+    origin: '*', 
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 // ==========================================
-// IMPORTACIÓN DE RUTAS
+// 3. IMPORTACIÓN DE RUTAS
 // ==========================================
 const usuariosRouter = require('./src/routes/Usuarios');
 const authRouter = require('./src/routes/authRoutes');
+const serviciosRouter = require('./src/routes/servicios');
+const horariosRouter = require('./src/routes/horarios'); // <--- IMPORTADO CORRECTAMENTE
 
 // ==========================================
-// DEFINICIÓN DE RUTAS
+// 4. DEFINICIÓN DE RUTAS (ENDPOINTS)
 // ==========================================
 app.use('/api/usuarios', usuariosRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/servicios', serviciosRouter);
+app.use('/api/horarios', horariosRouter); // <--- REGISTRADO CORRECTAMENTE
 
-// Ruta base
+// Ruta de prueba para verificar que el servidor responde
 app.get('/', (req, res) => {
   res.send('Backend de PonteGuapa funcionando correctamente');
 });
 
-// Ruta de prueba
-app.post('/test', (req, res) => {
-    console.log('Body recibido en test:', req.body);
-    res.json(req.body);
-});
+// ==========================================
+// 5. MANEJO DE ERRORES (404 y 500)
+// ==========================================
 
-// ==========================================
-// MANEJO DE ERRORES (IMPORTANTE)
-// ==========================================
-// Si una ruta no existe
+// Manejo de Rutas No Encontradas (404)
+// Si llegamos aquí es porque ninguna de las rutas de arriba coincidió
 app.use((req, res, next) => {
     res.status(404).json({ message: "La ruta solicitada no existe" });
 });
 
-// Error general del servidor
+// Manejo de Errores Internos del Servidor (500)
 app.use((err, req, res, next) => {
-    console.error('Error no controlado:', err.stack);
-    res.status(500).json({ error: 'Algo salió mal en el servidor' });
+    console.error('Error detectado:', err.stack);
+    res.status(500).json({ 
+        error: 'Algo salió mal en el servidor',
+        message: err.message 
+    });
 });
 
 // ==========================================
-// INICIO DEL SERVIDOR
+// 6. INICIO DEL SERVIDOR
 // ==========================================
 app.listen(port, () => {
-  console.log(`Servidor corriendo en http://localhost:${port}`);
+  console.log(`🚀 Servidor corriendo en http://localhost:${port}`);
+  console.log(`📅 Rutas de horarios listas en http://localhost:${port}/api/horarios`);
 });
