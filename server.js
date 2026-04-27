@@ -27,6 +27,7 @@ const serviciosRouter    = require('./src/routes/servicios');
 const horariosRouter     = require('./src/routes/horarios');
 const promocionesRouter  = require('./src/routes/promociones');
 const recompensasRouter  = require('./src/routes/recompensas'); // ← NUEVO
+const notificacionesRouter = require('./src/routes/notificaciones');
 
 // ==========================================
 // 4. DEFINICIÓN DE RUTAS (ENDPOINTS)
@@ -37,6 +38,7 @@ app.use('/api/servicios',   serviciosRouter);
 app.use('/api/horarios',    horariosRouter);
 app.use('/api/promociones', promocionesRouter);
 app.use('/api/recompensas', recompensasRouter); // ← NUEVO
+app.use('/api/notificaciones', notificacionesRouter);
 
 // Ruta de prueba
 app.get('/', (req, res) => {
